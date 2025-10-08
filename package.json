@@ -1,0 +1,20 @@
+{
+  "name": "music-formatter",
+  "version": "1.0.0",
+  "description": "A script to standardize music for a music library.",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "bin": {
+    "music-formatter": "./index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "music-metadata": "7.14.0",
+    "node-id3": "0.2.6",
+    "yargs": "^18.0.0"
+  }
+}
