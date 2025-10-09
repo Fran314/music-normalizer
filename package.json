@@ -8,7 +8,7 @@
     "start": "node index.js"
   },
   "bin": {
-    "music-formatter": "./index.js"
+    "music-normalizer": "./index.js"
   },
   "author": "",
   "license": "ISC",

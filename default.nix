@@ -5,7 +5,7 @@
 }:
 
 buildNpmPackage {
-  pname = "music-formatter";
+  pname = "music-normalizer";
 
   version = "1.0.0";
 
