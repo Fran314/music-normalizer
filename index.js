@@ -13,7 +13,7 @@ const SUPPORTED_TYPES = ['.mp3', '.flac']
 const ALLOWED_GENRES = ['boogie woogie', 'lindy hop']
 
 const argv = yargs(hideBin(process.argv))
-    .command('$0 <source> <dest>', 'Standardise music files.', yargs => {
+    .command('$0 <source> <dest>', 'Normalize music files.', yargs => {
         return yargs
             .positional('source', {
                 describe:
@@ -47,6 +47,12 @@ const argv = yargs(hideBin(process.argv))
             'In recursive mode, preserve the directory structure of the source to the destination',
         default: false,
     })
+    .option('tagsOnly', {
+        type: 'boolean',
+        description:
+            'In normal mode, only transfer metadata from source to dest',
+        default: false,
+    })
     .demandCommand(2, 'You must provide both a source and a destination.')
     .help()
     .alias('help', 'h')
@@ -71,55 +77,54 @@ function toDotMp3(source) {
     return path.join(dirname, `${basename}.mp3`)
 }
 
-const getBitrate = async target => {
-    let ffprobeOutput = ''
-
-    const args = [
-        '-v',
-        'error',
-        '-show_entries',
-        'format=bit_rate',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
-        target,
-    ]
-    const ffprobe = spawn('ffprobe', args)
-
-    ffprobe.stdout.on('data', data => (ffprobeOutput += data.toString()))
-
-    return await new Promise((resolve, reject) => {
-        ffprobe.on('error', error => reject(error))
-        ffprobe.on('close', code => {
-            if (code !== 0)
-                return reject(new Error(`ffprobe failed with code ${code}.`))
-
-            const bitrate = parseInt(ffprobeOutput.trim())
-            if (isNaN(bitrate))
-                return reject(new Error('Failed to parse ffprobe output.'))
-
-            const kbps = Math.round(bitrate / 1000)
-            if (kbps >= 300) resolve('320k')
-            else if (kbps >= 240) resolve('256k')
-            else if (kbps >= 180) resolve('192k')
-            else resolve('128k')
-        })
-    })
-}
+// const getBitrate = async target => {
+//     let ffprobeOutput = ''
+//
+//     const args = [
+//         '-v',
+//         'error',
+//         '-show_entries',
+//         'format=bit_rate',
+//         '-of',
+//         'default=noprint_wrappers=1:nokey=1',
+//         target,
+//     ]
+//     const ffprobe = spawn('ffprobe', args)
+//
+//     ffprobe.stdout.on('data', data => (ffprobeOutput += data.toString()))
+//
+//     return await new Promise((resolve, reject) => {
+//         ffprobe.on('error', error => reject(error))
+//         ffprobe.on('close', code => {
+//             if (code !== 0)
+//                 return reject(new Error(`ffprobe failed with code ${code}.`))
+//
+//             const bitrate = parseInt(ffprobeOutput.trim())
+//             if (isNaN(bitrate))
+//                 return reject(new Error('Failed to parse ffprobe output.'))
+//
+//             const kbps = Math.round(bitrate / 1000)
+//             if (kbps >= 300) resolve('320k')
+//             else if (kbps >= 240) resolve('256k')
+//             else if (kbps >= 180) resolve('192k')
+//             else resolve('128k')
+//         })
+//     })
+// }
 
 const transcode = async (source, dest) => {
-    // I am aware that `music-metadata` also gives the bitrate of the song
-    // in the `metatada.format.bitrate` variable, but it is not guaranteed
-    // to be present and I trust more ffmpeg with calculating the bitrate
-    const kbps = await getBitrate(source)
-
     const ffmpegArgs = [
-        '-y',
-        '-i',
         source,
 
+        // force (overwrite existing files)
+        '-f',
+
+        // strip tags and metadata
+        '-mn',
+
         // normalize volume, remove silence from beginning and end (possibly leaving 1s of silence at the end)
-        '-af',
-        'loudnorm,silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse,apad=pad_dur=1',
+        '-pof',
+        'silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse,apad=pad_dur=2',
 
         // encode in mp3 (not necessary but added for clarity)
         '-c:a',
@@ -127,17 +132,18 @@ const transcode = async (source, dest) => {
 
         // set bitrate
         '-b:a',
-        kbps,
+        '192k',
 
-        // strip tags and metadata
-        '-map_metadata',
-        '-1',
+        // set extension
+        '-ext',
+        'mp3',
 
+        '-o',
         dest,
     ]
 
     return await new Promise((resolve, reject) => {
-        const proc = spawn('ffmpeg', ffmpegArgs, { detached: true })
+        const proc = spawn('ffmpeg-normalize', ffmpegArgs, { detached: true })
         proc.on('error', err => {
             reject(err)
         })
@@ -152,23 +158,23 @@ const transcode = async (source, dest) => {
 }
 const transcopy = async (source, dest) => {
     const ffmpegArgs = [
-        '-y',
-        '-i',
         source,
 
-        // copy audio channel without re-encoding
-        '-c:a',
-        'copy',
+        // force (overwrite existing files)
+        '-f',
 
         // strip tags and metadata
-        '-map_metadata',
-        '-1',
+        '-mn',
 
+        // keep original audio without re-encoding
+        '-koa',
+
+        '-o',
         dest,
     ]
 
     return await new Promise((resolve, reject) => {
-        const proc = spawn('ffmpeg', ffmpegArgs, { detached: true })
+        const proc = spawn('ffmpeg-normalize', ffmpegArgs, { detached: true })
         proc.on('error', err => {
             reject(err)
         })
@@ -265,8 +271,15 @@ if (argv.recursive) {
             ? path.join(argv.dest, relSource)
             : path.join(argv.dest, path.basename(relSource))
 
+        console.log(source)
         ensureDir(path.dirname(dest))
-        await processFile(source, dest, argv.copy)
+        const tags = await readTags(source)
+        if (argv.copy && isMp3(source)) {
+            await transcopy(source, dest)
+        } else {
+            await transcode(source, dest)
+        }
+        await writeTags(tags, dest)
     }
 } else {
     const isDestDir = await fs
@@ -279,5 +292,13 @@ if (argv.recursive) {
         ? path.join(argv.dest, toDotMp3(path.basename(source)))
         : argv.dest
 
-    await processFile(source, dest, argv.copy)
+    const tags = await readTags(source)
+    if (!argv.tagsOnly) {
+        if (argv.copy && isMp3(source)) {
+            await transcopy(source, dest)
+        } else {
+            await transcode(source, dest)
+        }
+    }
+    await writeTags(tags, dest)
 }

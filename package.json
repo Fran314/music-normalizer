@@ -1,7 +1,7 @@
 {
-  "name": "music-formatter",
+  "name": "music-normalizer",
   "version": "1.0.0",
-  "description": "A script to standardize music for a music library.",
+  "description": "A script to normalize music for a music library.",
   "main": "index.js",
   "type": "module",
   "scripts": {

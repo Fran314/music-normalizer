@@ -1,16 +1,17 @@
-# Music Formatter
+# Music Normalizer
 
-This script is a small utility that I use to standardise music files. It
-converts files to `.mp3` (eventually just copying without re-encoding when
-specified), normalizes the loudness and removes silence from the beginning and
-end.
+This script is a small utility that I use to normalize music files. It converts
+files to `.mp3` (eventually just copying without re-encoding when specified),
+normalizes the loudness and removes silence from the beginning and end.
+
+Requires to have installed both `ffmpeg` and `ffmpeg-normalize`
 
 ## Usage
 
 ```
-music-formatter <source> <dest> [OPTIONS]
+music-normalize <source> <dest> [OPTIONS]
 
-Standardise music files.
+Normalize music files.
 
 Positionals:
   source  Path to the source file. In recursive mode, the source must be a
@@ -28,5 +29,7 @@ Options:
                        directories)                   [boolean] [default: false]
   -k, --keepStructure  In recursive mode, preserve the directory structure of
                        the source to the destination  [boolean] [default: false]
+      --tagsOnly       In normal mode, only transfer metadata from source to
+                       dest                           [boolean] [default: false]
   -h, --help           Show help                                       [boolean]
 ```
