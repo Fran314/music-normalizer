@@ -216,7 +216,10 @@ const readTags = async source => {
 const writeTags = async (tags, dest) => {
     try {
         const fileBuffer = await fs.readFile(dest)
-        const success = NodeID3.write(tags, fileBuffer)
+        const success = NodeID3.write(
+            { ...tags, comment: { language: 'eng', text: tags.comment } },
+            fileBuffer,
+        )
         if (success === false) {
             throw new Error('Failed to write ID3 tags to buffer.')
         }
