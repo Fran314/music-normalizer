@@ -196,7 +196,7 @@ const formatGenres = genres => {
         .filter(g => ALLOWED_GENRES.includes(g))
 
     const unique = [...new Set(filtered)].sort()
-    return unique
+    return unique.join(', ')
 }
 const readTags = async source => {
     try {
