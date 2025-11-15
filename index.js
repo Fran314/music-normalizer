@@ -119,6 +119,10 @@ const transcode = async (source, dest) => {
         // force (overwrite existing files)
         '-f',
 
+        // loudness target (in LUFS, default is -23, Spotify uses -14)
+        '-t',
+        '-14',
+
         // strip tags and metadata
         '-mn',
 
@@ -189,35 +193,52 @@ const transcopy = async (source, dest) => {
 }
 
 const formatGenres = genres => {
-    if (!genres) return ''
+    if (!genres) return []
 
     const filtered = genres
         .flatMap(g => g.split(',').map(subG => subG.trim().toLowerCase()))
         .filter(g => ALLOWED_GENRES.includes(g))
 
     const unique = [...new Set(filtered)].sort()
-    return unique.join(', ')
+    return unique
 }
 const readTags = async source => {
     try {
         const tags = (await mm.parseFile(source)).common
+        const comment = tags.comment?.[0] || ''
+        const structure = comment.split('|')[0] || ''
+        const quadre = comment.split('|')[1] || ''
         return {
             title: tags.title || '',
             artist: tags.artist || '',
             genre: formatGenres(tags.genre),
             bpm: tags.bpm || '',
-            comment:
-                tags.comment && tags.comment.length > 0 ? tags.comment[0] : '',
+            structure,
+            quadre,
         }
     } catch (error) {
-        return { title: '', artist: '', genre: '', bpm: '', comment: '' }
+        return {
+            title: '',
+            artist: '',
+            genre: [],
+            bpm: '',
+            structure: '',
+            quadre: '',
+        }
     }
 }
 const writeTags = async (tags, dest) => {
     try {
         const fileBuffer = await fs.readFile(dest)
         const success = NodeID3.write(
-            { ...tags, comment: { language: 'eng', text: tags.comment } },
+            {
+                ...tags,
+                genre: tags.genre.join(', '),
+                comment: {
+                    language: 'eng',
+                    text: `${tags.structure}|${tags.quadre}`,
+                },
+            },
             fileBuffer,
         )
         if (success === false) {
@@ -254,16 +275,6 @@ const findMusicFiles = async (baseDir, currentDir = '') => {
     }
 
     return files
-}
-
-const processFile = async (source, dest, copy) => {
-    const tags = await readTags(source)
-    if (copy && isMp3(source)) {
-        await transcopy(source, dest)
-    } else {
-        await transcode(source, dest)
-    }
-    await writeTags(tags, dest)
 }
 
 if (argv.recursive) {
