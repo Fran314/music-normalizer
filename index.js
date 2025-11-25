@@ -282,8 +282,8 @@ if (argv.recursive) {
     for (const relSource of sources) {
         const source = path.join(argv.source, relSource)
         const dest = argv.keepStructure
-            ? path.join(argv.dest, relSource)
-            : path.join(argv.dest, path.basename(relSource))
+            ? path.join(argv.dest, toDotMp3(relSource))
+            : path.join(argv.dest, toDotMp3(path.basename(relSource)))
 
         console.log(source)
         ensureDir(path.dirname(dest))
