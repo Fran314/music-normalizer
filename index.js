@@ -3,62 +3,116 @@ import fs from 'fs/promises'
 import { existsSync } from 'fs'
 import { spawn } from 'child_process'
 
-import yargs from 'yargs'
-import { hideBin } from 'yargs/helpers'
-
 import * as mm from 'music-metadata'
 import NodeID3 from 'node-id3'
 
 const SUPPORTED_TYPES = ['.mp3', '.flac', '.m4a']
 const ALLOWED_GENRES = ['boogie woogie', 'lindy hop']
 
-const argv = yargs(hideBin(process.argv))
-    .command('$0 <source> <dest>', 'Normalize music files.', yargs => {
-        return yargs
-            .positional('source', {
-                describe:
-                    'Path to the source file. In recursive mode, the source must be a directory',
-                type: 'string',
-            })
-            .positional('dest', {
-                describe:
-                    'Path to the destination. In normal mode, this can be either a path to a file (new or existing), or a path to a directory, in which case the name of the source will be appended. In recursive mode, this must be a directory',
-                type: 'string',
-            })
-    })
-    .option('copy', {
-        alias: 'c',
-        type: 'boolean',
-        description:
-            'Copy audio instead of re-encoding (supported only for .mp3 sources)',
-        default: false,
-    })
-    .option('recursive', {
-        alias: 'r',
-        type: 'boolean',
-        description:
-            'Enable recursive mode (source and dest must be directories)',
-        default: false,
-    })
-    .option('keepStructure', {
-        alias: 'k',
-        type: 'boolean',
-        description:
-            'In recursive mode, preserve the directory structure of the source to the destination',
-        default: false,
-    })
-    .option('tagsOnly', {
-        type: 'boolean',
-        description:
-            'In normal mode, only transfer metadata from source to dest',
-        default: false,
-    })
-    .demandCommand(2, 'You must provide both a source and a destination.')
-    .help()
-    .alias('help', 'h')
-    .strict().argv
+const HELP = `Usage: music-normalizer [OPTIONS] <source> [sources...] <dest>
 
-export const ensureDir = async p => {
+Normalize music files with consistent volume and remove silence.
+
+Arguments:
+  <source(s)>               One or more source file(s) or directory(ies).
+                            Files must be .mp3, .flac, or .m4a format.
+                            Directories are processed recursively.
+  
+  <dest>                    Destination file or directory.
+                            - With a single file source: can be a file or directory
+                            - With multiple sources or directory sources: must be a directory
+
+Options:
+  -h, --help                Show this help message and exit
+  
+  -c, --copy                Copy audio instead of re-encoding (MP3 sources only).
+                            Faster but skips normalization and silence removal.
+  
+  -k, --keepStructure       When processing directories, preserve the directory
+                            structure in the destination. By default, all files
+                            are flattened into the destination directory.
+  
+  --tagsOnly                Only transfer metadata from source to destination
+                            without processing audio.
+
+Examples:
+  # Normalize a single file
+  node index.js song.mp3 output.mp3
+  
+  # Normalize a file to a directory
+  node index.js song.mp3 dest/
+  
+  # Normalize multiple files to a directory
+  node index.js song1.mp3 song2.flac song3.m4a dest/
+  
+  # Process a directory recursively (flattened)
+  node index.js input_dir/ dest/
+  
+  # Process a directory and keep structure
+  node index.js -k input_dir/ dest/
+  
+  # Copy without re-encoding (MP3 only)
+  node index.js -c song.mp3 dest/
+  
+  # Only update tags
+  node index.js --tagsOnly song.mp3 output.mp3
+
+Notes:
+  - All output files are converted to MP3 format at 192k bitrate
+  - Audio is normalized to -14 LUFS (Spotify standard)
+  - Silence is removed from beginning and end
+`
+
+
+const printHelp = () => {
+    console.log(HELP)
+}
+const exitError = (e) => {
+    printHelp()
+    console.error(`Error: ${e}`)
+    process.exit(1)
+}
+const parseArgs = args => {
+    const result = {
+        copy: false,
+        keepStructure: false,
+        tagsOnly: false,
+        sources: [],
+        dest: null,
+    }
+
+    const positionals = []
+
+    for (let i = 0; i < args.length; i++) {
+        const arg = args[i]
+
+        if (arg === '--help' || arg === '-h') {
+            printHelp()
+            process.exit(0)
+        } else if (arg === '--copy' || arg === '-c') {
+            result.copy = true
+        } else if (arg === '--keepStructure' || arg === '-k') {
+            result.keepStructure = true
+        } else if (arg === '--tagsOnly') {
+            result.tagsOnly = true
+        } else if (arg.startsWith('-')) {
+            exitError(`unknown option "${arg}"`)
+        } else {
+            positionals.push(arg)
+        }
+    }
+
+    if (positionals.length < 2) {
+        exitError('You must provide at least one source and one destination.')
+    }
+
+    result.dest = positionals[positionals.length - 1]
+    result.sources = positionals.slice(0, -1)
+
+    return result
+}
+
+const ensureDir = async p => {
     if (!existsSync(p)) {
         await fs.mkdir(p, { recursive: true })
     }
@@ -71,7 +125,7 @@ const isMusicFile = filename => {
     return SUPPORTED_TYPES.includes(path.extname(filename).toLowerCase())
 }
 
-function toDotMp3(source) {
+const toDotMp3 = (source) => {
     const dirname = path.dirname(source)
     const basename = path.basename(source, path.extname(source))
     return path.join(dirname, `${basename}.mp3`)
@@ -277,42 +331,141 @@ const findMusicFiles = async (baseDir, currentDir = '') => {
     return files
 }
 
-if (argv.recursive) {
-    const sources = await findMusicFiles(argv.source)
-    for (const relSource of sources) {
-        const source = path.join(argv.source, relSource)
-        const dest = argv.keepStructure
-            ? path.join(argv.dest, toDotMp3(relSource))
-            : path.join(argv.dest, toDotMp3(path.basename(relSource)))
-
-        console.log(source)
-        ensureDir(path.dirname(dest))
-        const tags = await readTags(source)
-        if (argv.copy && isMp3(source)) {
-            await transcopy(source, dest)
-        } else {
-            await transcode(source, dest)
-        }
-        await writeTags(tags, dest)
-    }
-} else {
-    const isDestDir = await fs
-        .stat(argv.dest)
-        .then(s => s.isDirectory())
-        .catch(() => false)
-
-    const source = argv.source
-    const dest = isDestDir
-        ? path.join(argv.dest, toDotMp3(path.basename(source)))
-        : argv.dest
-
+const processFile = async (source, dest, options) => {
+    console.log(source)
     const tags = await readTags(source)
-    if (!argv.tagsOnly) {
-        if (argv.copy && isMp3(source)) {
+
+    if (!options.tagsOnly) {
+        if (options.copy && isMp3(source)) {
             await transcopy(source, dest)
         } else {
             await transcode(source, dest)
         }
     }
+
     await writeTags(tags, dest)
 }
+
+const argv = parseArgs(process.argv.slice(2))
+
+const isDestDir = await fs
+    .stat(argv.dest)
+    .then(s => s.isDirectory())
+    .catch(() => false)
+
+const isSourceSingleFile = argv.sources.length == 1 && await fs
+    .stat(argv.sources[0])
+    .then(s => s.isFile())
+    .catch(() => false)
+
+if (!isDestDir && !isSourceSingleFile) {
+    exitError('when specifying multiple sources, destination must be a directory.')
+}
+
+const toProcess = []
+
+for (const source of argv.sources) {
+    const stats = await fs.stat(source).catch(() => null)
+
+    if (!stats) {
+        console.error(`Error: Source not found: ${source}`)
+        continue
+    }
+
+    if (stats.isDirectory()) {
+        const musicFiles = await findMusicFiles(source)
+
+        for (const relSourcePath of musicFiles) {
+            const fullSourcePath = path.join(source, relSourcePath)
+            const destPath = argv.keepStructure
+                ? path.join(argv.dest, toDotMp3(relSourcePath))
+                : path.join(argv.dest, toDotMp3(path.basename(relSourcePath)))
+            toProcess.push({
+                source: fullSourcePath,
+                dest: destPath,
+            })
+        }
+    } else if (stats.isFile()) {
+        if (!isMusicFile(source)) {
+            console.error(
+                `Error: File is not a supported music format: ${source}`,
+            )
+            continue
+        }
+        const destPath = isDestDir
+            ? path.join(argv.dest, toDotMp3(path.basename(source)))
+            : argv.dest
+
+        toProcess.push({
+            source: source,
+            dest: destPath,
+        })
+    }
+}
+
+for (const curr of toProcess) {
+    await ensureDir(path.dirname(curr.dest))
+    await processFile(curr.source, curr.dest, {
+        copy: argv.copy,
+        tagsOnly: argv.tagsOnly,
+    })
+}
+// for (const source of sources) {
+//     const stats = await fs.stat(source).catch(() => null)
+
+//     if (!stats) {
+//         console.error(`Error: Source not found: ${source}`)
+//         continue
+//     }
+
+//     if (stats.isDirectory()) {
+//         // Source is a directory - find all music files recursively
+//         if (argv.tagsOnly) {
+//             console.error(
+//                 'Error: --tagsOnly option only works with single file sources',
+//             )
+//             process.exit(1)
+//         }
+
+//         const musicFiles = await findMusicFiles(source)
+
+//         for (const relSource of musicFiles) {
+//             const fullSource = path.join(source, relSource)
+//             const destPath = argv.keepStructure
+//                 ? path.join(dest, toDotMp3(relSource))
+//                 : path.join(dest, toDotMp3(path.basename(relSource)))
+
+//             await ensureDir(path.dirname(destPath))
+//             await processFile(fullSource, destPath, {
+//                 copy: argv.copy,
+//                 tagsOnly: false,
+//             })
+//         }
+//     } else if (stats.isFile()) {
+//         // Source is a file
+//         if (!isMusicFile(source)) {
+//             console.error(
+//                 `Error: File is not a supported music format: ${source}`,
+//             )
+//             continue
+//         }
+
+//         // tagsOnly only works with single file source
+//         if (argv.tagsOnly && sources.length > 1) {
+//             console.error(
+//                 'Error: --tagsOnly option only works with single file sources',
+//             )
+//             process.exit(1)
+//         }
+
+//         const destPath = isDestDir
+//             ? path.join(dest, toDotMp3(path.basename(source)))
+//             : dest
+
+//         await ensureDir(path.dirname(destPath))
+//         await processFile(source, destPath, {
+//             copy: argv.copy,
+//             tagsOnly: argv.tagsOnly,
+//         })
+//     }
+// }

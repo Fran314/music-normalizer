@@ -9,27 +9,56 @@ Requires to have installed both `ffmpeg` and `ffmpeg-normalize`
 ## Usage
 
 ```
-music-normalize <source> <dest> [OPTIONS]
+music-normalizer [OPTIONS] <source> [sources...] <dest>
 
-Normalize music files.
+Normalize music files with consistent volume and remove silence.
 
-Positionals:
-  source  Path to the source file. In recursive mode, the source must be a
-          directory                                                     [string]
-  dest    Path to the destination. In normal mode, this can be either a path to
-          a file (new or existing), or a path to a directory, in which case the
-          name of the source will be appended. In recursive mode, this must be a
-          directory                                                     [string]
+Arguments:
+  <source(s)>               One or more source file(s) or directory(ies).
+                            Files must be .mp3, .flac, or .m4a format.
+                            Directories are processed recursively.
+  
+  <dest>                    Destination file or directory.
+                            - With a single file source: can be a file or directory
+                            - With multiple sources or directory sources: must be a directory
 
 Options:
-      --version        Show version number                             [boolean]
-  -c, --copy           Copy audio instead of re-encoding (supported only for
-                       .mp3 sources)                  [boolean] [default: false]
-  -r, --recursive      Enable recursive mode (source and dest must be
-                       directories)                   [boolean] [default: false]
-  -k, --keepStructure  In recursive mode, preserve the directory structure of
-                       the source to the destination  [boolean] [default: false]
-      --tagsOnly       In normal mode, only transfer metadata from source to
-                       dest                           [boolean] [default: false]
-  -h, --help           Show help                                       [boolean]
+  -h, --help                Show this help message and exit
+  
+  -c, --copy                Copy audio instead of re-encoding (MP3 sources only).
+                            Faster but skips normalization and silence removal.
+  
+  -k, --keepStructure       When processing directories, preserve the directory
+                            structure in the destination. By default, all files
+                            are flattened into the destination directory.
+  
+  --tagsOnly                Only transfer metadata from source to destination
+                            without processing audio.
+
+Examples:
+  # Normalize a single file
+  node index.js song.mp3 output.mp3
+  
+  # Normalize a file to a directory
+  node index.js song.mp3 dest/
+  
+  # Normalize multiple files to a directory
+  node index.js song1.mp3 song2.flac song3.m4a dest/
+  
+  # Process a directory recursively (flattened)
+  node index.js input_dir/ dest/
+  
+  # Process a directory and keep structure
+  node index.js -k input_dir/ dest/
+  
+  # Copy without re-encoding (MP3 only)
+  node index.js -c song.mp3 dest/
+  
+  # Only update tags
+  node index.js --tagsOnly song.mp3 output.mp3
+
+Notes:
+  - All output files are converted to MP3 format at 192k bitrate
+  - Audio is normalized to -14 LUFS (Spotify standard)
+  - Silence is removed from beginning and end
 ```
