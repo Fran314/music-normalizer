@@ -9,7 +9,7 @@ import { hideBin } from 'yargs/helpers'
 import * as mm from 'music-metadata'
 import NodeID3 from 'node-id3'
 
-const SUPPORTED_TYPES = ['.mp3', '.flac']
+const SUPPORTED_TYPES = ['.mp3', '.flac', '.m4a']
 const ALLOWED_GENRES = ['boogie woogie', 'lindy hop']
 
 const argv = yargs(hideBin(process.argv))
