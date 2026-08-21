@@ -6,8 +6,15 @@ import { spawn } from 'child_process'
 import * as mm from 'music-metadata'
 import NodeID3 from 'node-id3'
 
-const SUPPORTED_TYPES = ['.mp3', '.flac', '.m4a']
-const ALLOWED_GENRES = ['boogie woogie', 'lindy hop']
+const SUPPORTED_TYPES = [
+    '.mp3',
+    '.flac',
+    '.m4a',
+    '.wav',
+    '.ogg',
+    '.opus',
+    '.webm',
+]
 
 const HELP = `Usage: music-normalizer [OPTIONS] <source> [sources...] <dest>
 
@@ -17,45 +24,45 @@ Arguments:
   <source(s)>               One or more source file(s) or directory(ies).
                             Files must be .mp3, .flac, or .m4a format.
                             Directories are processed recursively.
-  
+
   <dest>                    Destination file or directory.
                             - With a single file source: can be a file or directory
                             - With multiple sources or directory sources: must be a directory
 
 Options:
   -h, --help                Show this help message and exit
-  
+
   -c, --copy                Copy audio instead of re-encoding (MP3 sources only).
                             Faster but skips normalization and silence removal.
-  
+
   -k, --keepStructure       When processing directories, preserve the directory
                             structure in the destination. By default, all files
                             are flattened into the destination directory.
-  
+
   --tagsOnly                Only transfer metadata from source to destination
                             without processing audio.
 
 Examples:
   # Normalize a single file
-  node index.js song.mp3 output.mp3
-  
+  music-normalizer song.mp3 output.mp3
+
   # Normalize a file to a directory
-  node index.js song.mp3 dest/
-  
+  music-normalizer song.mp3 dest/
+
   # Normalize multiple files to a directory
-  node index.js song1.mp3 song2.flac song3.m4a dest/
-  
+  music-normalizer song1.mp3 song2.flac song3.m4a dest/
+
   # Process a directory recursively (flattened)
-  node index.js input_dir/ dest/
-  
+  music-normalizer input_dir/ dest/
+
   # Process a directory and keep structure
-  node index.js -k input_dir/ dest/
-  
+  music-normalizer -k input_dir/ dest/
+
   # Copy without re-encoding (MP3 only)
-  node index.js -c song.mp3 dest/
-  
+  music-normalizer -c song.mp3 dest/
+
   # Only update tags
-  node index.js --tagsOnly song.mp3 output.mp3
+  music-normalizer --tagsOnly song.mp3 output.mp3
 
 Notes:
   - All output files are converted to MP3 format at 192k bitrate
@@ -63,12 +70,8 @@ Notes:
   - Silence is removed from beginning and end
 `
 
-
-const printHelp = () => {
+const exitError = e => {
     console.log(HELP)
-}
-const exitError = (e) => {
-    printHelp()
     console.error(`Error: ${e}`)
     process.exit(1)
 }
@@ -87,7 +90,7 @@ const parseArgs = args => {
         const arg = args[i]
 
         if (arg === '--help' || arg === '-h') {
-            printHelp()
+            console.log(HELP)
             process.exit(0)
         } else if (arg === '--copy' || arg === '-c') {
             result.copy = true
@@ -125,7 +128,7 @@ const isMusicFile = filename => {
     return SUPPORTED_TYPES.includes(path.extname(filename).toLowerCase())
 }
 
-const toDotMp3 = (source) => {
+const toDotMp3 = source => {
     const dirname = path.dirname(source)
     const basename = path.basename(source, path.extname(source))
     return path.join(dirname, `${basename}.mp3`)
@@ -246,38 +249,21 @@ const transcopy = async (source, dest) => {
     })
 }
 
-const formatGenres = genres => {
-    if (!genres) return []
-
-    const filtered = genres
-        .flatMap(g => g.split(',').map(subG => subG.trim().toLowerCase()))
-        .filter(g => ALLOWED_GENRES.includes(g))
-
-    const unique = [...new Set(filtered)].sort()
-    return unique
-}
 const readTags = async source => {
     try {
         const tags = (await mm.parseFile(source)).common
-        const comment = tags.comment?.[0] || ''
-        const structure = comment.split('|')[0] || ''
-        const quadre = comment.split('|')[1] || ''
         return {
             title: tags.title || '',
             artist: tags.artist || '',
-            genre: formatGenres(tags.genre),
             bpm: tags.bpm || '',
-            structure,
-            quadre,
+            comment: tags.comment || '',
         }
     } catch (error) {
         return {
             title: '',
             artist: '',
-            genre: [],
             bpm: '',
-            structure: '',
-            quadre: '',
+            comment: '',
         }
     }
 }
@@ -287,10 +273,9 @@ const writeTags = async (tags, dest) => {
         const success = NodeID3.write(
             {
                 ...tags,
-                genre: tags.genre.join(', '),
                 comment: {
                     language: 'eng',
-                    text: `${tags.structure}|${tags.quadre}`,
+                    text: tags.comment,
                 },
             },
             fileBuffer,
@@ -353,13 +338,17 @@ const isDestDir = await fs
     .then(s => s.isDirectory())
     .catch(() => false)
 
-const isSourceSingleFile = argv.sources.length == 1 && await fs
-    .stat(argv.sources[0])
-    .then(s => s.isFile())
-    .catch(() => false)
+const isSourceSingleFile =
+    argv.sources.length == 1 &&
+    (await fs
+        .stat(argv.sources[0])
+        .then(s => s.isFile())
+        .catch(() => false))
 
 if (!isDestDir && !isSourceSingleFile) {
-    exitError('when specifying multiple sources, destination must be a directory.')
+    exitError(
+        'when specifying multiple sources, destination must be a directory.',
+    )
 }
 
 const toProcess = []
@@ -410,62 +399,3 @@ for (const curr of toProcess) {
         tagsOnly: argv.tagsOnly,
     })
 }
-// for (const source of sources) {
-//     const stats = await fs.stat(source).catch(() => null)
-
-//     if (!stats) {
-//         console.error(`Error: Source not found: ${source}`)
-//         continue
-//     }
-
-//     if (stats.isDirectory()) {
-//         // Source is a directory - find all music files recursively
-//         if (argv.tagsOnly) {
-//             console.error(
-//                 'Error: --tagsOnly option only works with single file sources',
-//             )
-//             process.exit(1)
-//         }
-
-//         const musicFiles = await findMusicFiles(source)
-
-//         for (const relSource of musicFiles) {
-//             const fullSource = path.join(source, relSource)
-//             const destPath = argv.keepStructure
-//                 ? path.join(dest, toDotMp3(relSource))
-//                 : path.join(dest, toDotMp3(path.basename(relSource)))
-
-//             await ensureDir(path.dirname(destPath))
-//             await processFile(fullSource, destPath, {
-//                 copy: argv.copy,
-//                 tagsOnly: false,
-//             })
-//         }
-//     } else if (stats.isFile()) {
-//         // Source is a file
-//         if (!isMusicFile(source)) {
-//             console.error(
-//                 `Error: File is not a supported music format: ${source}`,
-//             )
-//             continue
-//         }
-
-//         // tagsOnly only works with single file source
-//         if (argv.tagsOnly && sources.length > 1) {
-//             console.error(
-//                 'Error: --tagsOnly option only works with single file sources',
-//             )
-//             process.exit(1)
-//         }
-
-//         const destPath = isDestDir
-//             ? path.join(dest, toDotMp3(path.basename(source)))
-//             : dest
-
-//         await ensureDir(path.dirname(destPath))
-//         await processFile(source, destPath, {
-//             copy: argv.copy,
-//             tagsOnly: argv.tagsOnly,
-//         })
-//     }
-// }
