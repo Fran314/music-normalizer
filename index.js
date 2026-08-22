@@ -1,4 +1,5 @@
 import path from 'path'
+import os from 'os'
 import fs from 'fs/promises'
 import { existsSync } from 'fs'
 import { spawn } from 'child_process'
@@ -38,6 +39,9 @@ Options:
   -k, --keepStructure       When processing directories, preserve the directory
                             structure in the destination. By default, all files
                             are flattened into the destination directory.
+
+  -j, --jobs <N>            Number of files to process in parallel.
+                            Defaults to the number of CPU cores minus one.
 
   --tagsOnly                Only transfer metadata from source to destination
                             without processing audio.
@@ -80,6 +84,7 @@ const parseArgs = args => {
         copy: false,
         keepStructure: false,
         tagsOnly: false,
+        jobs: Math.max(1, os.cpus().length - 1),
         sources: [],
         dest: null,
     }
@@ -98,6 +103,13 @@ const parseArgs = args => {
             result.keepStructure = true
         } else if (arg === '--tagsOnly') {
             result.tagsOnly = true
+        } else if (arg === '--jobs' || arg === '-j') {
+            const value = args[++i]
+            const parsed = parseInt(value, 10)
+            if (isNaN(parsed) || parsed < 1) {
+                exitError(`invalid value for ${arg}: "${value}"`)
+            }
+            result.jobs = parsed
         } else if (arg.startsWith('-')) {
             exitError(`unknown option "${arg}"`)
         } else {
@@ -392,10 +404,23 @@ for (const source of argv.sources) {
     }
 }
 
-for (const curr of toProcess) {
-    await ensureDir(path.dirname(curr.dest))
-    await processFile(curr.source, curr.dest, {
-        copy: argv.copy,
-        tagsOnly: argv.tagsOnly,
-    })
+const runWorker = async () => {
+    while (toProcess.length > 0) {
+        const curr = toProcess.shift()
+        await ensureDir(path.dirname(curr.dest))
+        await processFile(curr.source, curr.dest, {
+            copy: argv.copy,
+            tagsOnly: argv.tagsOnly,
+        })
+    }
 }
+
+try {
+    // priority (nice-ness) is inherited by children, so this affects the ffmpeg processes
+    os.setPriority(10)
+} catch (error) {
+    console.error(`Warning: could not lower process priority: ${error.message}`)
+}
+
+const workerCount = Math.min(argv.jobs, toProcess.length)
+await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
